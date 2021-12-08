@@ -1,10 +1,11 @@
 class Config:
     # VAE architecture
     kernels = 4
+    decoder_kernels = 3
     strides = 2
-    latent_dim = 28
+    latent_dim = 100
     filters = [32, 64, 128, 256, 512]
-    input_shape = (256, 256, 3)
+    input_shape = (224, 224, 3)
     last_conv_dim = int(input_shape[0] / (2 ** len(filters)))
     b_norm = 3
     # Batch Norm
