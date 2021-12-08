@@ -8,6 +8,9 @@ if __name__ == '__main__':
     parser.add_argument('ham_dataset_dir', type=str,
                         help='Path to ham dataset\'s category ex: `ham/bkl`.')
     parser.add_argument('-bs', '--batch_size', type=int, default=32, help='Batch size for the model (default - 32).')
+    parser.add_argument('-hp', '--history_path', type=str, default='checkpoints/vae/history.json', help='Path to where to store history in json '
+                                                                                                        'file. Ex: checkpoints/vae/history.json ('
+                                                                                                        'default)')
     parser.add_argument('-e', '--epochs', type=int, default=150, help='Number of epochs to train for (default - 150)')
     parser.add_argument('-xc', '--experiment_checkpoint', type=str, default='checkpoints/vae/vae',
                         help='Checkpoint to save after done training ex: (default) checkpoints/vae/vae -> checkpoints/vae/vae.index, checkpoints/vae/vae.data-00000-of-00001, checkpoints/vae/checkpoint.')
@@ -121,8 +124,8 @@ def plot_history_metric(metrics, history: keras.callbacks.History, clr=None, sav
 
 
 def main(args):
-    ham_dataset_dir, batch_size, epochs, experiment_checkpoint, cache, cache_file, num_workers = itemgetter('ham_dataset_dir',
-                                                                                                            'batch_size', 'epochs',
+    ham_dataset_dir, batch_size, history_path, epochs, experiment_checkpoint, cache, cache_file, num_workers = itemgetter('ham_dataset_dir',
+                                                                                                            'batch_size', 'history_path', 'epochs',
                                                                                                             'experiment_checkpoint',
                                                                                                             'cache',
                                                                                                             'cache_file',
@@ -178,7 +181,7 @@ def main(args):
             autoencoder.compile(optimizer=keras.optimizers.Adam(learning_rate=lr_schedule, clipvalue=5.0))
     else:
         autoencoder = ConvolutionalVAE()
-        autoencoder.compile(optimizer=keras.optimizers.Adam(), run_eagerly=True)
+        autoencoder.compile(optimizer=keras.optimizers.Adam(), run_eagerly=False)
     autoencoder.build(input_shape=(None, 224, 224, 3))
 
     if Path(f'{experiment_checkpoint}.index').is_file():
@@ -186,14 +189,14 @@ def main(args):
     history = autoencoder.fit(train_ds, validation_data=val_ds, epochs=epochs, workers=num_workers,
                               max_queue_size=30, callbacks=[early_stopping])
     autoencoder.save_weights(f'{experiment_checkpoint}')
-    if Path('checkpoints/vae/history.json').is_file():
-        with open('checkpoints/vae/history.json', 'r') as f:
+    if Path(history_path).is_file():
+        with open(history_path, 'r') as f:
             history_json = json.load(f)
             for metric in history.history:
                 history_json[metric].extend(history.history[metric])
             history.history = history_json
 
-    with open('checkpoints/vae/history.json', 'w') as f:
+    with open(history_path, 'w') as f:
         json.dump(history.history, f, indent=4)
     plot_history_metric(['loss', 'reconstruction_loss', 'kl_loss', 'perception_loss'], history)
     for image in val_ds.take(1):

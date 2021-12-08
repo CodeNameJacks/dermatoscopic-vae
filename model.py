@@ -7,6 +7,7 @@ from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input, decode_
 from tensorflow.keras.preprocessing import image
 
 from config import Config as c
+import pydevd
 
 
 class Sampling(keras.layers.Layer):
@@ -61,7 +62,7 @@ class ConvolutionalVAE(keras.Model):
 
         print('Loading VGG Model Weights')
         model = VGG16(include_top=False)
-        vgg_conv_block_ixs = [1, 4, 7]
+        vgg_conv_block_ixs = [1, 4, 7, 11, 15]
         outputs = [model.layers[i].output for i in vgg_conv_block_ixs]
         self.vgg_model = keras.Model(inputs=model.inputs, outputs=outputs)
 
@@ -99,7 +100,8 @@ class ConvolutionalVAE(keras.Model):
         return reconstruction
 
     def _total_loss_fn(self, reconstruction_loss, kl_loss, perception_loss):
-        return 0.125 * reconstruction_loss + 0.5 * perception_loss + kl_loss
+        reconstruction_loss = 0.5 * reconstruction_loss
+        return reconstruction_loss + 0.5 * perception_loss + kl_loss
 
     def test_step(self, data):
         z_mean, z_log_var, z = self.encoder(data)
