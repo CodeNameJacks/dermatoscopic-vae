@@ -1,4 +1,5 @@
 import argparse
+import json
 import multiprocessing
 from operator import itemgetter
 
@@ -7,6 +8,12 @@ if __name__ == '__main__':
     parser.add_argument('ham_dataset_dir', type=str,
                         help='Path to ham dataset\'s category ex: `ham/bkl`.')
     parser.add_argument('-bs', '--batch_size', type=int, default=32, help='Batch size for the model (default - 32).')
+    parser.add_argument('-hp', '--history_path', type=str, default='checkpoints/vae/history.json', help='Path to where to store history in json '
+                                                                                                        'file. Ex: checkpoints/vae/history.json ('
+                                                                                                        'default)')
+    parser.add_argument('-e', '--epochs', type=int, default=150, help='Number of epochs to train for (default - 150)')
+    parser.add_argument('-xc', '--experiment_checkpoint', type=str, default='checkpoints/vae/vae',
+                        help='Checkpoint to save after done training ex: (default) checkpoints/vae/vae -> checkpoints/vae/vae.index, checkpoints/vae/vae.data-00000-of-00001, checkpoints/vae/checkpoint.')
     parser.add_argument('-nw', '--num_workers', type=int, default=multiprocessing.cpu_count(),
                         help='Maximum number of processes to spin up when using process-based threading (default - number of cores [multiprocessing.cpu_count()]).')
     parser.add_argument('-c', '--cache', dest='cache', action='store_true', help='Caching of training data is enabled.')
@@ -21,8 +28,10 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.keras as keras
 import numpy as np
-from sklearn.model_selection import train_test_split
-from clr_callback import CyclicLR
+from os import makedirs
+from os.path import dirname
+from pathlib import Path
+
 from model import ConvolutionalVAE
 
 seed = 42
@@ -115,27 +124,32 @@ def plot_history_metric(metrics, history: keras.callbacks.History, clr=None, sav
 
 
 def main(args):
-    ham_dataset_dir, batch_size, cache, cache_file, num_workers = itemgetter('ham_dataset_dir',
-                                                                                 'batch_size', 'cache', 'cache_file',
-                                                                                 'num_workers')(args)
+    ham_dataset_dir, batch_size, history_path, epochs, experiment_checkpoint, cache, cache_file, num_workers = itemgetter('ham_dataset_dir',
+                                                                                                            'batch_size', 'history_path', 'epochs',
+                                                                                                            'experiment_checkpoint',
+                                                                                                            'cache',
+                                                                                                            'cache_file',
+                                                                                                            'num_workers')(args)
     print(f'Ham Directory: {ham_dataset_dir}')
+    print(f'Checkpoint Path: {experiment_checkpoint}')
+    makedirs(dirname(experiment_checkpoint), exist_ok=True)
+
     # Setup env
     initialize_training_env()
 
     if cache and len(cache_file.strip()) != 0:
-        import os
-        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+        makedirs(dirname(cache_file), exist_ok=True)
 
     checkpoint_path = 'training/cp{epoch:02d}-{val_loss:.2f}.ckpt'
     # Get speech commands
 
     train_ds = keras.preprocessing.image_dataset_from_directory(ham_dataset_dir, validation_split=0.2, color_mode='rgb',
-                                                                labels=None, shuffle=False, subset='training', image_size=(256, 256),
-                                                                batch_size=batch_size)
+                                                                labels=None, shuffle=True, subset='training', image_size=(224, 224),
+                                                                batch_size=batch_size, seed=42)
 
     val_ds = keras.preprocessing.image_dataset_from_directory(ham_dataset_dir, validation_split=0.2, color_mode='rgb',
-                                                              labels=None, shuffle=False, subset='validation', image_size=(256, 256),
-                                                              batch_size=batch_size)
+                                                              labels=None, shuffle=True, subset='validation', image_size=(224, 224),
+                                                              batch_size=batch_size, seed=42)
     rescale = keras.layers.experimental.preprocessing.Rescaling(scale=1.0 / 255)
     train_ds = train_ds.map(lambda x: rescale(x))
     val_ds = val_ds.map(lambda x: rescale(x))
@@ -143,26 +157,48 @@ def main(args):
     train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
 
+    steps_per_epoch = len(train_ds) * batch_size
+    num_times_to_halve_in_training = 5
+
     for image in train_ds.take(1):
         image = image[0]
         input_shape = image.shape
         print('Input shape:', input_shape)
 
     strategy = tf.distribute.MirroredStrategy()
-    clr = CyclicLR(base_lr=0.0005, max_lr=0.005, step_size=150., mode='triangular2')
-    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=8)
+    # clr = CyclicLR(base_lr=0.0005, max_lr=0.005, step_size=150., mode='triangular2')
+    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15)
+    # Learning rate schedule halves 5 times in total
+    lr_schedule = keras.optimizers.schedules.InverseTimeDecay(0.005, decay_steps=int(steps_per_epoch * (epochs / num_times_to_halve_in_training)),
+                                                              decay_rate=1, staircase=False)
+    checkpoint = keras.callbacks.ModelCheckpoint(f'{experiment_checkpoint}.ckpt', monitor='val_loss', verbose=1, save_best_only=True, mode='min',
+                                                 save_weights_only=True)
 
     print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
     if strategy.num_replicas_in_sync > 1:
         with strategy.scope():
             autoencoder = ConvolutionalVAE()
-            autoencoder.compile(optimizer=keras.optimizers.Adam())
+            autoencoder.compile(optimizer=keras.optimizers.Adam(learning_rate=lr_schedule, clipvalue=5.0))
     else:
         autoencoder = ConvolutionalVAE()
         autoencoder.compile(optimizer=keras.optimizers.Adam(), run_eagerly=False)
-    history = autoencoder.fit(train_ds, validation_data=val_ds, epochs=100, workers=num_workers,
+    autoencoder.build(input_shape=(None, 224, 224, 3))
+
+    if Path(f'{experiment_checkpoint}.index').is_file():
+        autoencoder.load_weights(f'./{experiment_checkpoint}')
+    history = autoencoder.fit(train_ds, validation_data=val_ds, epochs=epochs, workers=num_workers,
                               max_queue_size=30, callbacks=[early_stopping])
-    plot_history_metric(['loss', 'reconstruction_loss', 'kl_loss'], history)
+    autoencoder.save_weights(f'{experiment_checkpoint}')
+    if Path(history_path).is_file():
+        with open(history_path, 'r') as f:
+            history_json = json.load(f)
+            for metric in history.history:
+                history_json[metric].extend(history.history[metric])
+            history.history = history_json
+
+    with open(history_path, 'w') as f:
+        json.dump(history.history, f, indent=4)
+    plot_history_metric(['loss', 'reconstruction_loss', 'kl_loss', 'perception_loss'], history)
     for image in val_ds.take(1):
         image = image[0]
         imshow(image.numpy())

@@ -2,7 +2,12 @@ import tensorflow as tf
 import tensorflow.keras as keras
 import math
 
+import tf_slim as slim
+from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input, decode_predictions
+from tensorflow.keras.preprocessing import image
+
 from config import Config as c
+import pydevd
 
 
 class Sampling(keras.layers.Layer):
@@ -20,16 +25,14 @@ class Sampling(keras.layers.Layer):
 
 
 class ConvolutionalVAE(keras.Model):
-    def __init__(self, **kwargs):
+    def __init__(self, gamma=100, **kwargs):
         super(ConvolutionalVAE, self).__init__(**kwargs)
         self.code_dim_size = c.latent_dim
         self.target_image_dims = c.input_shape
         # Normalized beta value
-        self.b_norm = c.b_norm * self.code_dim_size / math.prod(self.target_image_dims)
-
+        self.b_norm = gamma * c.b_norm * self.code_dim_size / math.prod(self.target_image_dims)
+        print(f'Beta Normalized value: {self.b_norm}')
         e_input = keras.Input(shape=self.target_image_dims)  # (136, 64, 1)
-        kernels = 3
-        strides = 2
         for i, filter in enumerate(c.filters):
             if i == 0:
                 x = self._conv_block(e_input, filter)
@@ -49,28 +52,37 @@ class ConvolutionalVAE(keras.Model):
         d = keras.layers.Dense(c.last_conv_dim * c.last_conv_dim * c.filters[-1], activation='relu')(latent_input)
         d = keras.layers.Reshape((c.last_conv_dim, c.last_conv_dim, c.filters[-1]))(d)
 
-        for filter in reversed(c.filters):
-            d = self._deconv_block(d, filter)
+        for i, filter in enumerate(reversed(c.filters)):
+            d = self._deconv_block(d, filter, i)
 
-        decoder_output = keras.layers.Conv2DTranspose(filters=self.target_image_dims[-1], kernel_size=kernels, strides=1, padding='same')(d)
+        decoder_output = keras.layers.Conv2DTranspose(filters=self.target_image_dims[-1], kernel_size=c.kernels, strides=1, padding='same')(d)
         decoder_output = keras.layers.Activation('sigmoid', dtype='float32')(decoder_output)
         self.decoder = keras.Model(latent_input, decoder_output, name='decoder')
         self.decoder.summary()
 
+        print('Loading VGG Model Weights')
+        model = VGG16(include_top=False)
+        vgg_conv_block_ixs = [1, 4, 7, 11, 15]
+        outputs = [model.layers[i].output for i in vgg_conv_block_ixs]
+        self.vgg_model = keras.Model(inputs=model.inputs, outputs=outputs)
+
         self.total_loss_tracker = keras.metrics.Mean(name='total_loss')
         self.reconstruction_loss_tracker = keras.metrics.Mean(name='reconstruction_loss')
         self.kl_loss_tracker = keras.metrics.Mean(name='kl_loss')
+        self.perception_loss_tracker = keras.metrics.Mean(name='p_loss')
 
     def _conv_block(self, input, filter):
         with tf.name_scope('conv_block'):
             conv = keras.layers.Conv2D(filters=filter, kernel_size=c.kernels, strides=c.strides, padding='same')(input)
-            outputs = keras.layers.Activation('relu')(conv)
+            conv = keras.layers.BatchNormalization()(conv)
+            outputs = keras.layers.Activation(activation=tf.nn.leaky_relu)(conv)
         return outputs
 
-    def _deconv_block(self, input, filter):
+    def _deconv_block(self, input, filter, i):
         with tf.name_scope('deconv_block'):
             deconv = keras.layers.Conv2DTranspose(filters=filter, kernel_size=c.kernels, strides=c.strides, padding='same')(input)
-            outputs = keras.layers.Activation('relu')(deconv)
+            deconv = keras.layers.BatchNormalization()(deconv)
+            outputs = keras.layers.Activation(activation=tf.nn.leaky_relu)(deconv)
         return outputs
 
     @property
@@ -79,6 +91,7 @@ class ConvolutionalVAE(keras.Model):
             self.total_loss_tracker,
             self.reconstruction_loss_tracker,
             self.kl_loss_tracker,
+            self.perception_loss_tracker
         ]
 
     def call(self, inputs, training=None, mask=None):
@@ -86,18 +99,33 @@ class ConvolutionalVAE(keras.Model):
         reconstruction = self.decoder(z)
         return reconstruction
 
+    def _total_loss_fn(self, reconstruction_loss, kl_loss, perception_loss):
+        reconstruction_loss = 0.5 * reconstruction_loss
+        return reconstruction_loss + 0.5 * perception_loss + kl_loss
+
     def test_step(self, data):
         z_mean, z_log_var, z = self.encoder(data)
         reconstruction = self.decoder(z)
+        feature_maps_data = self.vgg_model(data)
+        feature_maps_reconstruction = self.vgg_model(reconstruction)
+        feature_losses = []
+        for i in range(len(feature_maps_data)):
+            feature_map_data = keras.layers.Flatten()(feature_maps_data[i])
+            feature_map_reconstruction = keras.layers.Flatten()(feature_maps_reconstruction[i])
+            feature_losses.append(tf.reduce_mean(tf.reduce_sum(tf.pow(feature_map_data - feature_map_reconstruction, 2))))
+
+        perception_loss = tf.math.add_n(feature_losses, 'perception_loss')
+
         reconstruction_loss = tf.reduce_mean(tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction), axis=(1, 2)))
         kl_loss = -0.5 * (1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var))
         kl_loss = tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
-        total_loss = reconstruction_loss + kl_loss
+        total_loss = self._total_loss_fn(reconstruction_loss, kl_loss, perception_loss)
 
         return {
             "loss": total_loss,
             "reconstruction_loss": reconstruction_loss,
-            "kl_loss": kl_loss
+            "kl_loss": kl_loss,
+            "perception_loss": perception_loss
         }
 
     def train_step(self, data):
@@ -106,20 +134,32 @@ class ConvolutionalVAE(keras.Model):
             z_mean, z_log_var, z = self.encoder(data)
             reconstruction = self.decoder(z)
 
+            feature_maps_data = self.vgg_model(data)
+            feature_maps_reconstruction = self.vgg_model(reconstruction)
+            feature_losses = []
+            for i in range(len(feature_maps_data)):
+                feature_map_data = keras.layers.Flatten()(feature_maps_data[i])
+                feature_map_reconstruction = keras.layers.Flatten()(feature_maps_reconstruction[i])
+                feature_losses.append(tf.reduce_mean(tf.reduce_sum(tf.pow(feature_map_data - feature_map_reconstruction, 2))))
+
+            perception_loss = tf.math.add_n(feature_losses, 'perception_loss')
+
             reconstruction_loss = tf.reduce_mean(tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction), axis=(1, 2)))
             kl_loss = -0.5 * (1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var))
             kl_loss = tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
             # Beta VAE
-            total_loss = reconstruction_loss + self.b_norm * kl_loss
+            total_loss = self._total_loss_fn(reconstruction_loss, kl_loss, perception_loss)
 
-        grads = tape.gradient(total_loss, self.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        grads = tape.gradient(total_loss, self.trainable_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
         self.total_loss_tracker.update_state(total_loss)
         self.reconstruction_loss_tracker.update_state(reconstruction_loss)
         self.kl_loss_tracker.update_state(kl_loss)
+        self.perception_loss_tracker.update_state(perception_loss)
 
         return {
             "loss": self.total_loss_tracker.result(),
             "reconstruction_loss": self.reconstruction_loss_tracker.result(),
             "kl_loss": self.kl_loss_tracker.result(),
+            "perception_loss": self.perception_loss_tracker.result()
         }
