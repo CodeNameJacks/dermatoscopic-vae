@@ -47,11 +47,12 @@ def main(args):
         # Then display reconstructions of original
         for i, reconstructed_image in enumerate(reconstructions):
             axarr[1, i].imshow(reconstructed_image)
-        # Finally display images generated from 100-dimension vector z ~ N(0,1) * eps + z_original, where eps is 0.25
+        # Finally display images generated from 100-dimension vector z ~ N(0,1) * eps + z_original, where eps is 0.2
         _, _, z_images = autoencoder.encoder(images)
         z_images = z_images.numpy()
         z_noise = np.random.standard_normal(z_images.shape)
-        z_altered = z_images + 0.3 * z_noise
+        eps = 0.2
+        z_altered = z_images + eps * z_noise
         sampled_images = autoencoder.decoder(z_altered).numpy()
         for i, sampled_image in enumerate(sampled_images):
             axarr[2, i].imshow(sampled_image)
