@@ -1,5 +1,5 @@
-speech_commands/**
 plots/**
 ham10000/**
 ham/**
 checkpoints/**
+gen_data/**
