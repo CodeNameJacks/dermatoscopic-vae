@@ -19,7 +19,7 @@ import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
 
 
-#defined VAE architecture paramteres
+#defined VAE architecture parameters
 kernels = 2
 strides = 2
 latent_dim = 28
@@ -71,7 +71,7 @@ val_ds = val_ds.map(lambda x, y: (rescale(x), y))
 train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
 val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
 
-#define the neural network
+#define the neural network model
 model = Sequential()
 for conv_filter in filters:
     model.add(keras.layers.Conv2D(conv_filter, 3, strides=2, padding='same', input_shape=input_shape))
