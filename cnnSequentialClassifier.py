@@ -19,9 +19,7 @@ import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
 
 
-
-
-#VAE architecture and paramteres
+#defined VAE architecture paramteres
 kernels = 2
 strides = 2
 latent_dim = 28
@@ -40,7 +38,7 @@ seed = 42
 #define early stopping paramters
 es = EarlyStopping(monitor='val_accuracy', mode='max', verbose=1, patience=5)
 
-#load and split datatse
+#load and split datatset
 train_ds = keras.preprocessing.image_dataset_from_directory(ham_dataset_dir, validation_split=0.3, color_mode='rgb',
                                                           labels='inferred', shuffle=True, subset='validation', image_size=(224, 224),
                                                           batch_size=batch_size, seed=seed)
