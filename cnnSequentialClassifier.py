@@ -23,7 +23,7 @@ from sklearn.utils.class_weight import compute_class_weight
 kernels = 2
 strides = 2
 latent_dim = 28
-filters = [32, 64, 128, 224, 512]
+filters = [32, 64, 128, 256, 512]
 input_shape = (224, 224, 3)
 last_conv_dim = int(input_shape[0] / (2 ** len(filters)))
 b_norm = 3
