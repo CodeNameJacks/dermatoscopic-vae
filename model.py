@@ -1,13 +1,10 @@
-import tensorflow as tf
-import tensorflow.keras as keras
 import math
 
-import tf_slim as slim
-from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input, decode_predictions
-from tensorflow.keras.preprocessing import image
+import tensorflow as tf
+import tensorflow.keras as keras
+from tensorflow.keras.applications.vgg16 import VGG16
 
 from config import Config as c
-import pydevd
 
 
 class Sampling(keras.layers.Layer):

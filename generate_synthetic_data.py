@@ -7,7 +7,8 @@ if __name__ == '__main__':
                                                         "input checkpoints/vae/vae")
     parser.add_argument('-hdd', '--ham_dataset_dir', type=str, required=True, help='Dataset to test VAE on (only 1 class) ex: ham/mel')
     parser.add_argument('-sd', '--save_dir', type=str, default='gen_data', help='Directory to store the generated data')
-    parser.add_argument('-e', '--epsilon', type=float, default=0.2, help='Epsilon value for generating noise on latent space from standard normal')
+    parser.add_argument('-e', '--epsilon', type=float, default=0.2, help='Epsilon value for generating noise on latent space from standard normal '
+                                                                         'ex: 0.2 (default)')
     parser.add_argument('-nm', '--num_images', type=int, default=800, help='Number of images to reconstruct')
     args = vars(parser.parse_args())
 
