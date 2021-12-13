@@ -90,3 +90,10 @@ optional arguments:
   -nm NUM_IMAGES, --num_images NUM_IMAGES
                         Number of images to reconstruct
 ```
+
+### Training Classifier
+1. Open up the `ham_classifier.ipynb` file in jupyter notebook. Make sure the `ham_dataset_dir` is pointing to the a directory that contains subdirectories for the four classes; 'bcc', 'bkl', 'mel', and 'nv'.
+2. Ensure that the 'mel_source_dir' is pointing to a directory that contains subdirectories labelled 'mel_true' and 'gen_data' which contain the real and synthetic images respectively.
+3. Specify the number of real images and synthetic images to be used for training using the 'mel_test_num' and 'mel_gen_num' variables. Neither value should be greater than the number of images contained in their respective 'mel_source_dir' directories.
+4. Create the '/plots' '/reports' and '/history' directory so that plots, reports, and data from training and evaluation can be saved for future reference.
+5. Run all cells.
