@@ -1,7 +1,6 @@
 class Config:
     # VAE architecture
     kernels = 4
-    decoder_kernels = 3
     strides = 2
     latent_dim = 128
     filters = [32, 64, 128, 256, 512]

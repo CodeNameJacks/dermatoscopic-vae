@@ -6,7 +6,7 @@ from operator import itemgetter
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('ham_dataset_dir', type=str,
-                        help='Path to ham dataset\'s category ex: `ham/bkl`.')
+                        help='Path to ham dataset\'s category ex: `ham/mel`.')
     parser.add_argument('-bs', '--batch_size', type=int, default=32, help='Batch size for the model (default - 32).')
     parser.add_argument('-hp', '--history_path', type=str, default='checkpoints/vae/history.json', help='Path to where to store history in json '
                                                                                                         'file. Ex: checkpoints/vae/history.json ('
